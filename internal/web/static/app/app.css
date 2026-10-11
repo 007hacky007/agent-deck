@@ -729,6 +729,23 @@ body[data-rail="hidden"] .rightrail { display: none; }
 }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); outline: 0; }
 
+.path-dialog-overlay { height: var(--path-viewport-height, 100%); top: var(--path-viewport-top, 0px); bottom: auto; }
+.path-dialog { max-height: calc(var(--path-viewport-height, var(--app-height, 100dvh)) - 80px); }
+.path-input { position: relative; min-width: 0; }
+.path-input input { width: 100%; box-sizing: border-box; }
+.path-suggestions {
+  margin-top: 4px;
+  max-height: min(160px, calc(var(--path-viewport-height, var(--app-height, 100dvh)) / 4)); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+.path-suggestions [role="option"] {
+  padding: 8px 10px; font-family: var(--mono); font-size: 12px; cursor: pointer;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.path-suggestions [role="option"]:hover,
+.path-suggestions [aria-selected="true"] { background: var(--accent-soft); color: var(--text-hi); }
+
 .dialog .ro-value {
   font-family: var(--mono); font-size: 12px; color: var(--text-hi);
   padding: 7px 9px; border: 1px solid var(--border); border-radius: 4px;

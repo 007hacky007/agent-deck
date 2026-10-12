@@ -10,7 +10,7 @@ let dir
 let many
 test.beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'web-paths-'))
-  for (const name of ['AirConnect', 'SpotConnect', '.hidden', 'A <img>', 'Long' + 'x'.repeat(180)]) {
+  for (const name of ['AirConnect', 'SpotConnect', '.hidden', 'A <img>', 'cash$PR_TRIAL_UNSET', 'cash${HOME}', 'Long' + 'x'.repeat(180)]) {
     mkdirSync(join(dir, name))
   }
   writeFileSync(join(dir, 'A-file'), 'private contents')
@@ -123,6 +123,43 @@ test('dropdown fits long names at every viewport', async ({ page, request, viewp
   await input.press('ArrowUp')
   await expect(page.getByRole('option').last()).toBeInViewport()
   await expect(page.getByRole('option').last()).toHaveAttribute('aria-selected', 'true')
+})
+
+test('folder rows expose pointer, touch and keyboard affordances in both themes', async ({ page, request }, testInfo) => {
+  // Both theme captures and video teardown share this test's time budget.
+  test.setTimeout(60_000)
+  const input = await openDialog(page, request)
+  await input.fill(dir + '/')
+  const rows = page.getByRole('option')
+  await expect(rows).toHaveCount(4)
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    for (const row of await rows.all()) {
+      await expect(row.locator('[aria-hidden="true"] svg')).toBeVisible()
+      await expect(row).toHaveCSS('cursor', 'pointer')
+      expect((await row.boundingBox()).height).toBeGreaterThanOrEqual(44)
+    }
+    const row = page.getByRole('option', { name: 'AirConnect', exact: true })
+    await page.mouse.move(0, 0)
+    const idleBackground = await row.evaluate(el => getComputedStyle(el).backgroundColor)
+    await row.hover()
+    await expect.poll(() => row.evaluate(el => getComputedStyle(el).backgroundColor)).not.toBe(idleBackground)
+    await page.mouse.move(0, 0)
+    await input.press('ArrowDown')
+    await input.press('ArrowDown')
+    await expect(row).toHaveAttribute('aria-selected', 'true')
+    await expect(input).toHaveAttribute('aria-activedescendant', await row.getAttribute('id'))
+    await expect(input).toBeFocused()
+    await expect(row).toHaveCSS('outline-style', 'solid')
+    const selectedBackground = await row.evaluate(el => getComputedStyle(el).backgroundColor)
+    expect(selectedBackground).not.toBe(idleBackground)
+    await page.screenshot({ path: '/tmp/path-polish-' + testInfo.project.name + '-' + theme + '.png' })
+    await input.press('Escape')
+    await input.fill(dir + '/S')
+    await expect(rows).toHaveCount(1)
+    await input.fill(dir + '/')
+    await expect(rows).toHaveCount(4)
+  }
 })
 
 test('late responses cannot replace a newer prefix', async ({ page, request }) => {

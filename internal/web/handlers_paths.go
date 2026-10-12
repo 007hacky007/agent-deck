@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/asheshgoplani/agent-deck/internal/session"
 )
@@ -23,11 +24,20 @@ func (s *Server) handlePathSuggestions(w http.ResponseWriter, r *http.Request) {
 	if err != nil || paths == nil {
 		paths = []string{}
 	}
-	if len(paths) > maxSuggestions {
-		paths = paths[:maxSuggestions]
+	// Filesystem names are literal, but session creation expands variables.
+	// Never offer a completion that expansion would redirect elsewhere.
+	suggestions := make([]string, 0, maxSuggestions)
+	for _, path := range paths {
+		if os.ExpandEnv(path) != path {
+			continue
+		}
+		suggestions = append(suggestions, path)
+		if len(suggestions) == maxSuggestions {
+			break
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, struct {
 		Suggestions []string `json:"suggestions"`
-	}{Suggestions: paths})
+	}{Suggestions: suggestions})
 }

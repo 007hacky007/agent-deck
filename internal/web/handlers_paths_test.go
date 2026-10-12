@@ -61,8 +61,12 @@ func TestPathSuggestions(t *testing.T) {
 }
 
 func TestPathSuggestionsLimit(t *testing.T) {
+	t.Setenv("PR_TRIAL_UNSET", "")
 	dir := t.TempDir()
 	for i := range 30 {
+		if err := os.Mkdir(filepath.Join(dir, fmt.Sprintf("${PR_TRIAL_UNSET}%02d", i)), 0755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.Mkdir(filepath.Join(dir, fmt.Sprintf("dir-%02d", i)), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -107,5 +111,35 @@ func TestPathSuggestionsAuthAndMethod(t *testing.T) {
 				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.status, rr.Body.String())
 			}
 		})
+	}
+}
+
+// A completion must not become a different path when submitted to the resolver.
+func TestPathSuggestionsOmitReinterpretedNames(t *testing.T) {
+	t.Setenv("PR_TRIAL_UNSET", "")
+	t.Setenv("PR_TRIAL_BOUND", "different")
+	dir := t.TempDir()
+	for _, name := range []string{"cash$PR_TRIAL_UNSET", "cash${PR_TRIAL_BOUND}", "cash$", "ordinary"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := NewServer(Config{ListenAddr: "127.0.0.1:0"})
+	for _, prefix := range []string{dir + "/", dir + "/cash$PR_TRIAL_UNSET"} {
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, newLocalRequest(http.MethodGet, "/api/path-suggestions?prefix="+url.QueryEscape(prefix), nil))
+		var body struct {
+			Suggestions []string `json:"suggestions"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{}
+		if prefix == dir+"/" {
+			want = []string{dir + "/cash$", dir + "/ordinary"}
+		}
+		if !reflect.DeepEqual(body.Suggestions, want) {
+			t.Fatalf("prefix=%q suggestions=%v want=%v", prefix, body.Suggestions, want)
+		}
 	}
 }

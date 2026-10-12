@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { authHeaders } from './api.js'
+import { Icon, ICONS } from './icons.js'
 import { pathSuggestionAction } from './pathSuggestions.js'
 
 export function PathInput({ value, onInput }) {
@@ -118,10 +119,11 @@ export function PathInput({ value, onInput }) {
       ${paths.length > 0 && html`
         <div id="create-session-path-list" class="path-suggestions" role="listbox" aria-label="Directories" ref=${listRef}>
           ${paths.map((path, i) => html`
-            <div id=${'create-session-path-' + i} key=${path} role="option"
+            <div id=${'create-session-path-' + i} key=${path} role="option" class="path-suggestion"
                  aria-selected=${index === i} title=${path}
                  onPointerDown=${e => e.preventDefault()} onClick=${() => accept(path)}>
-              ${path.split('/').filter(Boolean).pop()}
+              <span class="path-suggestion-icon" aria-hidden="true"><${Icon} d=${ICONS.folder} size=${16}/></span>
+              <span class="path-suggestion-label">${path.split('/').filter(Boolean).pop()}</span>
             </div>
           `)}
         </div>

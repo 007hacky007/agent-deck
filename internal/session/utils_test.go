@@ -192,3 +192,25 @@ func TestCompletionCycler_MatchesAndIndex(t *testing.T) {
 	assert.Nil(t, cycler.Matches())
 	assert.Equal(t, -1, cycler.Index())
 }
+
+// A huge directory must not make one completion read every entry.
+func TestReadDirBoundedCapsAndSorts(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"d", "b", "e", "a", "c"} {
+		require.NoError(t, os.Mkdir(filepath.Join(dir, name), 0755))
+	}
+	all, err := readDirBounded(dir, 100)
+	require.NoError(t, err)
+	names := make([]string, 0, len(all))
+	for _, e := range all {
+		names = append(names, e.Name())
+	}
+	assert.Equal(t, []string{"a", "b", "c", "d", "e"}, names)
+
+	capped, err := readDirBounded(dir, 3)
+	require.NoError(t, err)
+	assert.Len(t, capped, 3)
+
+	_, err = readDirBounded(filepath.Join(dir, "missing"), 3)
+	assert.Error(t, err)
+}

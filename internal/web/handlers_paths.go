@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/asheshgoplani/agent-deck/internal/session"
 )
@@ -29,7 +30,16 @@ func (s *Server) handlePathSuggestions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const maxSuggestions = 20
-	paths, err := session.GetDirectoryCompletions(r.URL.Query().Get("prefix"))
+	w.Header().Set("Cache-Control", "no-store")
+	prefix := r.URL.Query().Get("prefix")
+	// The ".." check is inline so static analysis sees the guard directly.
+	if !suggestablePrefix(prefix) || strings.Contains(prefix, "..") {
+		writeJSON(w, http.StatusOK, struct {
+			Suggestions []string `json:"suggestions"`
+		}{Suggestions: []string{}})
+		return
+	}
+	paths, err := session.GetDirectoryCompletions(prefix)
 	if err != nil || paths == nil {
 		paths = []string{}
 	}
@@ -45,8 +55,29 @@ func (s *Server) handlePathSuggestions(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, struct {
 		Suggestions []string `json:"suggestions"`
 	}{Suggestions: suggestions})
+}
+
+// maxSuggestionPrefix is far above any real path the dialog needs (PATH_MAX is
+// 4096 on Linux) and keeps hostile input from reaching the filesystem.
+const maxSuggestionPrefix = 4096
+
+// suggestablePrefix reports whether prefix may be completed over the web API.
+// The caller also refuses any "..".
+//
+// Exposure model: the caller already passed the host allowlist, the token
+// check and the mutations gate, so it may create a session (and run commands)
+// in any directory the server user can reach. Listing directory names there
+// discloses nothing that caller could not already obtain. The checks below
+// are defense in depth: NUL bytes and oversized input are refused outright,
+// and any ".." is refused so completion never walks out of the typed parent
+// (including through a symlink followed by ".."). The TUI keeps its ".."
+// support; the web dialog takes absolute or ~ paths.
+func suggestablePrefix(prefix string) bool {
+	if prefix == "" || len(prefix) > maxSuggestionPrefix {
+		return false
+	}
+	return !strings.ContainsRune(prefix, 0)
 }

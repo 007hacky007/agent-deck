@@ -1,8 +1,11 @@
 package session
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -92,7 +95,7 @@ func GetDirectoryCompletions(input string) ([]string, error) {
 		return []string{originalInput}, nil
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := readDirBounded(dir, maxCompletionScan)
 	if err != nil {
 		return nil, nil // Silently ignore errors (e.g. invalid parent dir)
 	}
@@ -123,6 +126,34 @@ func GetDirectoryCompletions(input string) ([]string, error) {
 	}
 
 	return matches, nil
+}
+
+// maxCompletionScan bounds how many directory entries one completion request
+// reads, so a directory with millions of entries (or a slow network mount)
+// cannot make a single keystroke, or a web request, do unbounded work.
+const maxCompletionScan = 10000
+
+// readDirBounded reads at most limit entries of dir and returns them sorted by
+// name, like os.ReadDir. Entries past the limit are not considered.
+func readDirBounded(dir string, limit int) ([]os.DirEntry, error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var entries []os.DirEntry
+	for len(entries) < limit {
+		batch, err := f.ReadDir(min(512, limit-len(entries)))
+		entries = append(entries, batch...)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	return entries, nil
 }
 
 // CompletionCycler manages the state of directory autocomplete.

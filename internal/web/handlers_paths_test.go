@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -167,5 +168,72 @@ func TestPathSuggestionsForbiddenWithoutMutations(t *testing.T) {
 				t.Fatalf("status=%d want=403 body=%s", rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+// Hostile prefixes must never reach the filesystem: no "..", no NUL bytes, no
+// oversized input. Each case would list something without the guard.
+func TestPathSuggestionsRejectsTraversalAndHostileInput(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	outside := filepath.Join(root, "outside")
+	for _, d := range []string{filepath.Join(home, "sub"), filepath.Join(outside, "secret")} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(home, "link")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Chdir(home)
+	srv := NewServer(Config{ListenAddr: "127.0.0.1:0", WebMutations: true})
+	long := home + "/" + strings.Repeat("a", maxSuggestionPrefix)
+	for _, tc := range []struct{ name, prefix string }{
+		{"dotdot absolute", home + "/sub/../"},
+		{"dotdot to sibling", home + "/../"},
+		{"dotdot partial", home + "/../out"},
+		{"terminal dotdot", home + "/sub/.."},
+		{"tilde dotdot", "~/../"},
+		{"symlink dotdot", "~/link/../"},
+		{"relative dotdot", "../"},
+		{"nul byte", home + "/\x00"},
+		{"oversized", long},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, newLocalRequest(http.MethodGet, "/api/path-suggestions?prefix="+url.QueryEscape(tc.prefix), nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+			var body struct {
+				Suggestions []string `json:"suggestions"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Suggestions) != 0 {
+				t.Fatalf("prefix %q leaked %v", tc.prefix, body.Suggestions)
+			}
+		})
+	}
+	// Control: an ordinary prefix in the same tree still completes.
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, newLocalRequest(http.MethodGet, "/api/path-suggestions?prefix="+url.QueryEscape(home+"/s"), nil))
+	if !strings.Contains(rr.Body.String(), home+"/sub") {
+		t.Fatalf("control prefix did not complete: %s", rr.Body.String())
+	}
+}
+
+// "~user" must not reach another account's home: it is read as a name under
+// the server user's own HOME.
+func TestPathSuggestionsTildeUserStaysInHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srv := NewServer(Config{ListenAddr: "127.0.0.1:0", WebMutations: true})
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, newLocalRequest(http.MethodGet, "/api/path-suggestions?prefix="+url.QueryEscape("~root/"), nil))
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "/root/") {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

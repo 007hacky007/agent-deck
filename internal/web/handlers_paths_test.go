@@ -24,7 +24,7 @@ func TestPathSuggestions(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "A-file"), []byte("private contents"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(Config{ListenAddr: "127.0.0.1:0", ReadOnly: true})
+	srv := NewServer(Config{ListenAddr: "127.0.0.1:0", WebMutations: true})
 	for _, tc := range []struct {
 		name, prefix string
 		want         []string
@@ -72,7 +72,7 @@ func TestPathSuggestionsLimit(t *testing.T) {
 		}
 	}
 	rr := httptest.NewRecorder()
-	NewServer(Config{ListenAddr: "127.0.0.1:0"}).Handler().ServeHTTP(rr,
+	NewServer(Config{ListenAddr: "127.0.0.1:0", WebMutations: true}).Handler().ServeHTTP(rr,
 		newLocalRequest(http.MethodGet, "/api/path-suggestions?prefix="+url.QueryEscape(dir+"/"), nil))
 	var body struct {
 		Suggestions []string `json:"suggestions"`
@@ -86,7 +86,7 @@ func TestPathSuggestionsLimit(t *testing.T) {
 }
 
 func TestPathSuggestionsAuthAndMethod(t *testing.T) {
-	srv := NewServer(Config{ListenAddr: "127.0.0.1:0", Token: "test-token"})
+	srv := NewServer(Config{ListenAddr: "127.0.0.1:0", Token: "test-token", WebMutations: true})
 	for _, tc := range []struct {
 		name, method, header, query, cookie string
 		status                              int
@@ -124,7 +124,7 @@ func TestPathSuggestionsOmitReinterpretedNames(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	srv := NewServer(Config{ListenAddr: "127.0.0.1:0"})
+	srv := NewServer(Config{ListenAddr: "127.0.0.1:0", WebMutations: true})
 	for _, prefix := range []string{dir + "/", dir + "/cash$PR_TRIAL_UNSET"} {
 		rr := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rr, newLocalRequest(http.MethodGet, "/api/path-suggestions?prefix="+url.QueryEscape(prefix), nil))
@@ -141,5 +141,31 @@ func TestPathSuggestionsOmitReinterpretedNames(t *testing.T) {
 		if !reflect.DeepEqual(body.Suggestions, want) {
 			t.Fatalf("prefix=%q suggestions=%v want=%v", prefix, body.Suggestions, want)
 		}
+	}
+}
+
+// Read-only servers must not enumerate directories: the only consumer is the
+// New Session dialog, which is not shown when mutations are disabled.
+func TestPathSuggestionsForbiddenWithoutMutations(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "secret"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"read-only", Config{ListenAddr: "127.0.0.1:0", ReadOnly: true}},
+		{"read-only with mutations flag", Config{ListenAddr: "127.0.0.1:0", ReadOnly: true, WebMutations: true}},
+		{"mutations disabled", Config{ListenAddr: "127.0.0.1:0", WebMutations: false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			NewServer(tc.cfg).Handler().ServeHTTP(rr,
+				newLocalRequest(http.MethodGet, "/api/path-suggestions?prefix="+url.QueryEscape(dir+"/"), nil))
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("status=%d want=403 body=%s", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }

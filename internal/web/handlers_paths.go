@@ -18,6 +18,15 @@ func (s *Server) handlePathSuggestions(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusUnauthorized, ErrCodeUnauthorized, "unauthorized")
 		return
 	}
+	// Suggestions only feed the New Session dialog, which is hidden when web
+	// mutations are off. Do not expose directory listing in read-only mode.
+	if s.cfg.ReadOnly {
+		writeAPIError(w, http.StatusForbidden, ErrCodeForbidden, "web mutations are disabled")
+		return
+	}
+	if !s.checkMutationsAllowed(w) {
+		return
+	}
 
 	const maxSuggestions = 20
 	paths, err := session.GetDirectoryCompletions(r.URL.Query().Get("prefix"))
